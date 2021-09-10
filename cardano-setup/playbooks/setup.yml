@@ -1,0 +1,191 @@
+---
+- name: setup
+  become: yes
+  gather_facts: false
+  hosts: all
+  vars:
+    cabal_version: '3.4.0.0'
+    ghc_version: '8.10.4'
+    BOOTSTRAP_HASKELL_CABAL_VERSION: '{{ cabal_version }}'
+    BOOTSTRAP_HASKELL_GHC_VERSION: '{{ ghc_version }}'
+    BOOTSTRAP_HASKELL_NONINTERACTIVE: 1
+    PATH: '/opt/ghcup/bin:/opt/ghcup/scripts:/opt/cardano-node:/opt/cardano-cli:/usr/bin:$PATH'
+    haskell_src: 'https://downloads.haskell.org/~cabal/cabal-install-{{ cabal_version }}/cabal-install-{{ cabal_version }}.tar.gz'
+    libsodium_hash: '66f017f1'
+    testnet_config_files:
+      - 'https://hydra.iohk.io/job/Cardano/cardano-node/cardano-deployment/latest-finished/download/1/testnet-config.json'
+      - 'https://hydra.iohk.io/job/Cardano/cardano-node/cardano-deployment/latest-finished/download/1/testnet-byron-genesis.json'
+      - 'https://hydra.iohk.io/job/Cardano/cardano-node/cardano-deployment/latest-finished/download/1/testnet-shelley-genesis.json'
+      - 'https://hydra.iohk.io/job/Cardano/cardano-node/cardano-deployment/latest-finished/download/1/testnet-topology.json'
+    mainnet_config_files:
+      - 'https://hydra.iohk.io/job/Cardano/cardano-node/cardano-deployment/latest-finished/download/1/mainnet-config.json'
+      - 'https://hydra.iohk.io/job/Cardano/cardano-node/cardano-deployment/latest-finished/download/1/mainnet-byron-genesis.json'
+      - 'https://hydra.iohk.io/job/Cardano/cardano-node/cardano-deployment/latest-finished/download/1/mainnet-shelley-genesis.json'
+      - 'https://hydra.iohk.io/job/Cardano/cardano-node/cardano-deployment/latest-finished/download/1/mainnet-topology.json'
+ 
+  tasks:
+    - name: motd
+      copy:
+        dest: /etc/motd
+        owner: root
+        group: root
+        mode: 0644
+        content: |
+
+          cardano setup:
+            - https://github.com/input-output-hk/cardano-node/blob/master/doc/getting-started/install.md
+
+          iohk repo:
+            - https://github.com/input-output-hk/cardano-node
+
+          haskell:
+            - https://www.haskell.org/cabal/download.html
+         
+    - name: PATH setups
+      copy:
+        dest: /etc/profile.d/cabal.sh
+        mode: 0755
+        content: |
+          export BOOTSTRAP_HASKELL_CABAL_VERSION={{ BOOTSTRAP_HASKELL_CABAL_VERSION }}
+          export BOOTSTRAP_HASKELL_GHC_VERSION={{ BOOTSTRAP_HASKELL_GHC_VERSION }}
+          export BOOTSTRAP_HASKELL_NONINTERACTIVE={{ BOOTSTRAP_HASKELL_NONINTERACTIVE }}
+          export PATH={{ PATH }}
+          export LD_LIBRARY_PATH="/usr/local/lib:$LD_LIBRARY_PATH"
+          export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH"
+          alias tailf="tail -f"
+
+    - name: install packages
+      dnf:
+        state: latest
+        name:
+          - autoconf
+          - curl
+          - epel-release
+          - gcc
+          - gcc-c++
+          - git
+          - gmp
+          - gmp-devel
+          - libtool
+          - make
+          - ncurses-compat-libs
+          - ncurses-devel
+          - mlocate
+          - perl
+          - systemd-devel
+          - tar
+          - tmux
+          - vim
+          - wget
+          - xz
+          - zlib-devel
+          
+    - name: install more packages
+      dnf:
+        state: latest
+        name:
+          - jq
+          # - ghc-Cabal
+        enablerepo: epel
+
+    # - name: get cardano testnet config files
+    #   get_url:
+    #     timeout: 30
+    #     url: 'https://hydra.iohk.io/job/Cardano/cardano-node/cardano-deployment/latest-finished/download/1/{{ item }}'
+    #     dest: /tmp/
+    #   with_items:
+    #     - 'testnet-config.json'
+    #     - 'testnet-byron-genesis.json'
+    #     - 'testnet-shelley-genesis.json'
+    #     - 'testnet-topology.json'
+
+    - name: create directories
+      file:
+        path: '{{ item }}'
+        state: directory
+        recurse: yes
+        owner: root
+        group: root
+        mode: 0775
+      with_items:
+        - '/opt/cardano-cli'
+        - '/opt/cardano-node'
+        - '/opt/ghcup/scripts'
+        - '/opt/libsodium' 
+
+    ###################
+    # HASKELL INSTALL #
+    ###################
+    - name: download ghcup install from https://get-ghcup.haskell.org to /opt/ghcup/ghcup-install
+      get_url:
+        url: https://get-ghcup.haskell.org
+        dest: /opt/ghcup/scripts/ghcup-install.sh
+        mode: 0755
+
+    - name: install ghcup
+      environment:
+        PATH: "{{ PATH }}"
+        BOOTSTRAP_HASKELL_NONINTERACTIVE: "{{ BOOTSTRAP_HASKELL_NONINTERACTIVE }}"
+        BOOTSTRAP_HASKELL_GHC_VERSION: "{{ BOOTSTRAP_HASKELL_GHC_VERSION }}"
+        BOOTSTRAP_HASKELL_CABAL_VERSION: "{{ BOOTSTRAP_HASKELL_CABAL_VERSION }}"
+      shell: /opt/ghcup/scripts/ghcup-install.sh
+
+    - name: move ghcup/cabal to /opt/ghcup
+      copy:
+        src: /root/.ghcup/
+        dest: /opt/ghcup/
+        remote_src: yes
+        follow: yes
+        directory_mode: yes
+
+    - name: update cabal
+      environment:
+        PATH: "{{ PATH }}"
+        BOOTSTRAP_HASKELL_NONINTERACTIVE: "{{ BOOTSTRAP_HASKELL_NONINTERACTIVE }}"
+        BOOTSTRAP_HASKELL_GHC_VERSION: "{{ BOOTSTRAP_HASKELL_GHC_VERSION }}"
+        BOOTSTRAP_HASKELL_CABAL_VERSION: "{{ BOOTSTRAP_HASKELL_CABAL_VERSION }}"
+      shell: |
+        cabal update
+        ghcup install ghc {{ ghc_version }}
+        ghcup install cabal {{ cabal_version }}
+        ghcup set ghc {{ ghc_version }}
+        ghcup set cabal {{ cabal_version }}
+
+    #####################
+    # LIBSODIUM INSTALL #
+    #####################
+    - name: clone libsodium repository
+      git: 
+        repo: 'https://github.com/input-output-hk/libsodium'
+        dest: '/opt/libsodium'
+        force: yes
+
+    - name: install libsodium
+      shell: |
+        cd /opt/libsodium
+        git checkout {{ libsodium_hash }}
+        ./autogen.sh
+        ./configure
+        make
+        make install
+
+    ###################
+    # CARDANO INSTALL #
+    ###################
+    - name: clone cardano repository
+      git:
+        repo: 'https://github.com/input-output-hk/cardano-node.git'
+        dest: '/opt/cardano-node.git'
+        force: yes
+
+    - name: install cardano
+      shell: |
+        export PATH={{ PATH }}
+        cd /opt/cardano-node.git
+        git fetch --all --recurse-submodules --tags
+        git checkout tags/$(git tag | sort -V | grep ^1 | grep -v rc | tail -1)
+        cabal configure --with-compiler=ghc-{{ ghc_version }}
+        cabal build all
+        cp -p "$(./scripts/bin-path.sh cardano-node)" /opt/cardano-node
+        cp -p "$(./scripts/bin-path.sh cardano-cli)" /opt/cardano-cli
+
